@@ -88,7 +88,20 @@ int *buildAscendingTour(int n) {
     return tour;
 }
 
-int *buildRandomTour(int n);
+void swap(int* a, int* b) {
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+int *buildRandomTour(int n) {
+    int *tour = buildAscendingTour(n);
+    for( int i = n - 1; i > 0; i--) {
+        int j = genrand() % (i + 1);
+        swap(&tour[i], &tour[j]);
+    }
+    return tour;
+}
 
 int calcTourLength(int *tour, int n) {
     int length = 0;
@@ -163,7 +176,11 @@ int main(int argc, char *argv[]) {
 
     cost_Array = buildCostArray(city, N);
 
-    int *tour = buildAscendingTour(N);
+    int *tour = buildRandomTour(N);
+    for(int i = 0; i < N; i++) {
+        printf("%d ", tour[i]);
+    }
+    printf("\n");
     printf("総移動コスト: %d\n", calcTourLength(tour, N));
 
     fclose(fp);
