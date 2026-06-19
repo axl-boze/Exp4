@@ -15,7 +15,6 @@ typedef struct {
 int N;
 City *city;
 int IMAX;
-int interval = 100;
 
 /*
  * コスト行列は対称行列なので、下三角部分だけを1次元配列に格納する。
@@ -144,6 +143,7 @@ void writeTourFile(int i,int n, int iteration, int cost, int* tour, City* city) 
 繰り返し回数と暫定解を出力できる。
 */
 int *randomSearch(int iteration, int n, City* city) {
+    int interval = 100;
     if (iteration <= 0) return NULL;
     //printf("Iteration,Tentative Solution\n");
     int *besttour = NULL;
