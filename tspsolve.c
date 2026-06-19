@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <limits.h>
 #include "mt19937.h"
 
 typedef struct {
@@ -14,6 +15,7 @@ typedef struct {
 int N;
 City *city;
 int IMAX;
+int interval = 100;
 
 /*
  * コスト行列は対称行列なので、下三角部分だけを1次元配列に格納する。
@@ -71,8 +73,9 @@ int cost(int a, int b) {
 }
 
 /*
-昇順にたどる順回路を設定し、総移動コストを計算する。
+昇順にたどる巡回路を設定し、総移動コストを計算する。
 終点から始点に戻ってくる際のコストを加え忘れないように注意。
+6/19 1~nから0~n-1に変更。[都市番号] - 1に対応
 */
 int *buildAscendingTour(int n) {
     int *tour = malloc(sizeof(int) * n);
@@ -83,7 +86,7 @@ int *buildAscendingTour(int n) {
     }
 
     for (int i = 0; i < n; i++) {
-        tour[i] = i + 1;
+        tour[i] = i;
     }
 
     return tour;
@@ -95,7 +98,7 @@ void swap(int* a, int* b) {
     *b = tmp;
 }
 /*
-ランダムな順回路を作成。
+ランダムな巡回路を作成。
 n番目の要素を、乱数の割り算によって決めていく。
 */
 int *buildRandomTour(int n) {
@@ -119,13 +122,33 @@ int calcTourLength(int *tour, int n) {
     return length;
 }
 
-int *randomSearch(int imax, int n) {
-    if (imax <= 0) return NULL;
-    printf("Iteration,Tentative Solution\n");
-    int *besttour = buildRandomTour(n);
-    int bestlength = calcTourLength(besttour, n);
-    printf("1,%d\n", bestlength);
-    for(int i = 1; i < imax; i++) {
+void writeTourFile(int i,int n, int iteration, int cost, int* tour, City* city) {
+    char filename[30];
+    FILE *fp;
+    sprintf(filename, "./tour/random-tour-%d.dat", i);
+    if((fp = fopen(filename, "w")) == NULL) {
+        fprintf(stderr, "FILE open error: %s", filename);
+        exit(1);
+    }
+    fprintf(fp, "# Repetition: %d / %d\n", i, iteration);
+    fprintf(fp, "# Cost: %d\n", cost);
+    for(int i = 0; i < n; i++) {
+        fprintf(fp, "%d %d\n", city[tour[i]].x, city[tour[i]].y);
+    }
+    fprintf(fp, "%d %d\n", city[tour[0]].x, city[tour[0]].y);
+    fclose(fp);
+}
+
+/*
+ランダムな巡回路を探索し、最良解を見つけだす。
+繰り返し回数と暫定解を出力できる。
+*/
+int *randomSearch(int iteration, int n, City* city) {
+    if (iteration <= 0) return NULL;
+    //printf("Iteration,Tentative Solution\n");
+    int *besttour = NULL;
+    int bestlength = INT_MAX;
+    for(int i = 1; i <= iteration; i++) {
         int *tour = buildRandomTour(n);
         int length = calcTourLength(tour, n);
         if(length < bestlength) {
@@ -135,10 +158,14 @@ int *randomSearch(int imax, int n) {
         }else {
             free(tour);
         }
-        printf("%d,%d\n", i + 1, bestlength);
+        //printf("%d,%d\n", i, bestlength);
+        if( i % interval == 0) {
+            writeTourFile(i, n, iteration, bestlength, besttour, city);
+        }
     }
     return besttour;
 }
+
 
 int main(int argc, char *argv[]) {
     seed((uint_fast32_t)time(NULL));
@@ -202,7 +229,7 @@ int main(int argc, char *argv[]) {
 
     cost_Array = buildCostArray(city, N);
 
-    int *tour = randomSearch(IMAX, N);
+    int *tour = randomSearch(IMAX, N, city);
 
     fclose(fp);
     free(city);
