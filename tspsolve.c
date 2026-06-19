@@ -13,6 +13,7 @@ typedef struct {
 
 int N;
 City *city;
+int IMAX;
 
 /*
  * コスト行列は対称行列なので、下三角部分だけを1次元配列に格納する。
@@ -93,7 +94,10 @@ void swap(int* a, int* b) {
     *a = *b;
     *b = tmp;
 }
-
+/*
+ランダムな順回路を作成。
+n番目の要素を、乱数の割り算によって決めていく。
+*/
 int *buildRandomTour(int n) {
     int *tour = buildAscendingTour(n);
     for( int i = n - 1; i > 0; i--) {
@@ -115,8 +119,30 @@ int calcTourLength(int *tour, int n) {
     return length;
 }
 
+int *randomSearch(int imax, int n) {
+    if (imax <= 0) return NULL;
+    printf("Iteration,Tentative Solution\n");
+    int *besttour = buildRandomTour(n);
+    int bestlength = calcTourLength(besttour, n);
+    printf("1,%d\n", bestlength);
+    for(int i = 1; i < imax; i++) {
+        int *tour = buildRandomTour(n);
+        int length = calcTourLength(tour, n);
+        if(length < bestlength) {
+            free(besttour);
+            besttour = tour;
+            bestlength = length;
+        }else {
+            free(tour);
+        }
+        printf("%d,%d\n", i + 1, bestlength);
+    }
+    return besttour;
+}
+
 int main(int argc, char *argv[]) {
     seed((uint_fast32_t)time(NULL));
+    int IMAX = atoi(argv[2]);
     if (argc < 2) {
         fprintf(stderr, "Usage: tspsolve <file_path>\n");
         exit(1);
@@ -176,16 +202,12 @@ int main(int argc, char *argv[]) {
 
     cost_Array = buildCostArray(city, N);
 
-    int *tour = buildRandomTour(N);
-    for(int i = 0; i < N; i++) {
-        printf("%d ", tour[i]);
-    }
-    printf("\n");
-    printf("総移動コスト: %d\n", calcTourLength(tour, N));
+    int *tour = randomSearch(IMAX, N);
 
     fclose(fp);
     free(city);
     free(cost_Array);
+    free(tour);
 
     return 0;
 }
