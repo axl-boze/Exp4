@@ -6,15 +6,34 @@
 #include <limits.h>
 #include "mt19937.h"
 
+typedef enum {
+    METHOD_RANDOM,
+    METHOD_HC
+} SearchMethod;
+
+typedef enum {
+    NEIGHBOR_SWAP, 
+    NEIGHBOR_2OPT
+} Neighborhood;
+
+typedef struct {
+    SearchMethod method;
+    int iterations; //ランダム探索用
+    Neighborhood neighborhood; // 山登り法用
+} SearhConfig;
+
+
 typedef struct {
     int id;
     int x;
     int y;
 } City;
 
+typedef int (*ImproveFunction)(int *, int);
+
 int N;
 City *city;
-int IMAX;
+char* FileName;
 
 /*
  * コスト行列は対称行列なので、下三角部分だけを1次元配列に格納する。
@@ -68,7 +87,7 @@ int *buildCostArray(City *city, int n) {
 }
 
 int cost(int a, int b) {
-    return cost_Array[costIndex(a - 1, b - 1)];
+    return cost_Array[costIndex(a, b)];
 }
 
 /*
@@ -129,6 +148,7 @@ void writeTourFile(int i,int n, int iteration, int cost, int* tour, City* city) 
         fprintf(stderr, "FILE open error: %s", filename);
         exit(1);
     }
+    fprintf(fp, "# Subect: %s\n", FileName);
     fprintf(fp, "# Repetition: %d / %d\n", i, iteration);
     fprintf(fp, "# Cost: %d\n", cost);
     for(int i = 0; i < n; i++) {
@@ -166,16 +186,58 @@ int *randomSearch(int iteration, int n, City* city) {
     return besttour;
 }
 
+int improveBySwap(int* tour, int n) {
+}
+
+int improveBy2opt(int* tour, int n) {
+}
+
+void hillClimbing(int *tour, int n, ImproveFunction improve) {
+    while(improve(tour, n)){
+
+    }
+}
 
 int main(int argc, char *argv[]) {
     seed((uint_fast32_t)time(NULL));
-    int IMAX = atoi(argv[2]);
-    if (argc < 2) {
-        fprintf(stderr, "Usage: tspsolve <file_path>\n");
+    if (argc != 4) {
+        fprintf(stderr,
+           "Usage:\n"
+           "  %s <file> r  <iterations>\n"
+           "  %s <file> hc <neighborhood>\n",
+            argv[0], argv[0]);
         exit(1);
     }
 
-    FILE *fp = fopen(argv[1], "r");
+    FileName = argv[1];
+
+    SearhConfig config;
+
+    if(strcmp(argv[2], "r") == 0) {
+        char *end;
+        long value = strtol(argv[3], &end, 10);
+        if (*end != '\0' || value <= 0 || value > INT_MAX) {
+            fprintf(stderr, "Invalid iteration count: %s\n", argv[3]);
+            exit(1);
+        }
+        config.method = METHOD_RANDOM;
+        config.iterations = (int)value;
+    }else if (strcmp(argv[2], "hc") == 0) {
+        config.method = METHOD_HC;
+
+        if (strcmp(argv[3], "swap") == 0) {
+            config.neighborhood = NEIGHBOR_SWAP; 
+        }else if (strcmp(argv[3], "2opt") == 0) {
+            config.neighborhood = NEIGHBOR_2OPT;
+        }else{
+            fprintf(stderr, "Invailed Neighborhood option\n");
+            exit(1);
+        }
+    }else {
+        fprintf(stderr, "Invailed argument\n");
+    }
+
+    FILE *fp = fopen(FileName, "r");
     if (fp == NULL) {
         fprintf(stderr, "File open error: %s\n", argv[1]);
         exit(1);
@@ -184,14 +246,9 @@ int main(int argc, char *argv[]) {
     do {
         char buf[100];
 
-        if (fscanf(fp, "%99s", buf) != 1) {
-            fprintf(stderr, "DIMENSION not found.\n");
-            fclose(fp);
-            exit(1);
-        }
 
         if (strcmp("DIMENSION", buf) == 0) {
-            fscanf(fp, "%99s", buf);
+            fscanf(fp, "%s", buf);
             break;
         }
 
@@ -212,13 +269,6 @@ int main(int argc, char *argv[]) {
     do {
         char buf[100];
 
-        if (fscanf(fp, "%99s", buf) != 1) {
-            fprintf(stderr, "NODE_COORD_SECTION not found.\n");
-            free(city);
-            fclose(fp);
-            exit(1);
-        }
-
         if (strcmp("NODE_COORD_SECTION", buf) == 0) {
             for (int i = 0; i < N; i++) {
                 fscanf(fp, "%d %d %d", &city[i].id, &city[i].x, &city[i].y);
@@ -229,12 +279,21 @@ int main(int argc, char *argv[]) {
 
     cost_Array = buildCostArray(city, N);
 
-    int *tour = randomSearch(IMAX, N, city);
+    int *tour = NULL;
 
+    if (config.method == METHOD_RANDOM) {
+        tour = randomSearch(config.iterations, N, city);
+    } else if(config.method == METHOD_HC) {
+        tour = buildRandomTour(N);
+        if(config.neighborhood == NEIGHBOR_SWAP) {
+            hillClimbing(tour, N, improveBySwap);
+        }else if(config.neighborhood == NEIGHBOR_2OPT) {
+            hillClimbing2(tour, N, improveBy2opt);
+        }
+    }
     fclose(fp);
     free(city);
     free(cost_Array);
     free(tour);
-
     return 0;
 }
