@@ -149,21 +149,34 @@ int calcTourLength(int *tour, int n) {
     return length;
 }
 
-void writeTourFile(int i,int n, int iteration, int cost, int* tour, City* city) {
-    char filename[30];
+void writeTourFile( const char *prefix, int iter, int maxIter, int costValue, int *tour, int n, City *city) {
+    char filename[256];
     FILE *fp;
-    sprintf(filename, "./tour/random-tour-%d.dat", i);
-    if((fp = fopen(filename, "w")) == NULL) {
-        fprintf(stderr, "FILE open error: %s", filename);
+
+    snprintf(filename, sizeof(filename), "./%s-tour/%s-tour-%d.dat", prefix, prefix, iter);
+
+    fp = fopen(filename, "w");
+    if (fp == NULL) {
+        fprintf(stderr, "FILE open error: %s\n", filename);
         exit(1);
     }
-    fprintf(fp, "# Subect: %s\n", FileName);
-    fprintf(fp, "# Repetition: %d / %d\n", i, iteration);
-    fprintf(fp, "# Cost: %d\n", cost);
-    for(int i = 0; i < n; i++) {
-        fprintf(fp, "%d %d\n", city[tour[i]].x, city[tour[i]].y);
+
+    fprintf(fp, "# Subject: %s\n", FileName);
+
+    if (maxIter > 0) {
+        fprintf(fp, "# Repetition: %d / %d\n", iter, maxIter);
+    } else {
+        fprintf(fp, "# Repetition: %d\n", iter);
     }
+
+    fprintf(fp, "# Cost: %d\n", costValue);
+
+    for (int k = 0; k < n; k++) {
+        fprintf(fp, "%d %d\n", city[tour[k]].x, city[tour[k]].y);
+    }
+
     fprintf(fp, "%d %d\n", city[tour[0]].x, city[tour[0]].y);
+
     fclose(fp);
 }
 
@@ -171,8 +184,7 @@ void writeTourFile(int i,int n, int iteration, int cost, int* tour, City* city) 
 ランダムな巡回路を探索し、最良解を見つけだす。
 繰り返し回数と暫定解を出力できる。
 */
-int *randomSearch(int iteration, int n, City* city) {
-    int interval = 100;
+int *randomSearch(int iteration, int n, City* city, int interval) {
     if (iteration <= 0) return NULL;
     //printf("Iteration,Tentative Solution\n");
     int *besttour = NULL;
@@ -189,7 +201,7 @@ int *randomSearch(int iteration, int n, City* city) {
         }
         //printf("%d,%d\n", i, bestlength);
         if( i % interval == 0) {
-            writeTourFile(i, n, iteration, bestlength, besttour, city);
+            writeTourFile("random", i, iteration, bestlength, besttour, n, city);
         }
     }
     return besttour;
@@ -339,7 +351,7 @@ int improveBy2Opt(int *tour, int n)
     return 0;
 }
 
-HillClimbingResult hillClimbing(int *tour, int n, ImproveFunction improve) {
+HillClimbingResult hillClimbing(int *tour, int n, ImproveFunction improve, const char *prefix, int interval) {
     HillClimbingResult result;
 
     result.cost = calcTourLength(tour, n);
@@ -364,6 +376,10 @@ HillClimbingResult hillClimbing(int *tour, int n, ImproveFunction improve) {
         result.iterations++;
 
         printf("%d,%d\n", result.iterations, result.cost);
+
+        if (result.iterations % interval == 0) {
+            writeTourFile(prefix, result.iterations, -1, result.cost, tour, n, city);
+        }
     }
     return result;
 }
@@ -465,13 +481,13 @@ int main(int argc, char *argv[]) {
     int *tour = NULL;
 
     if (config.method == METHOD_RANDOM) {
-        tour = randomSearch(config.iterations, N, city);
+        tour = randomSearch(config.iterations, N, city, 100);
     } else if(config.method == METHOD_HC) {
         tour = buildRandomTour(N);
         if(config.neighborhood == NEIGHBOR_SWAP) {
-            hillClimbing(tour, N, improveBySwap);
+            hillClimbing(tour, N, improveBySwap, "hc-swap", 1);
         }else if(config.neighborhood == NEIGHBOR_2OPT) {
-            hillClimbing(tour, N, improveBy2Opt);
+            hillClimbing(tour, N, improveBy2Opt, "hc-2opt", 1);
         }
     }
     fclose(fp);
