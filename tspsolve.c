@@ -149,6 +149,27 @@ int calcTourLength(int *tour, int n) {
     return length;
 }
 
+void printResultHeader(
+    const char *instance,
+    const char *method,
+    const char *neighborhood,
+    unsigned long seedValue
+) {
+    printf("# Instance: %s\n", instance);
+    printf("# Method: %s\n", method);
+
+    if (neighborhood != NULL) {
+        printf("# Neighborhood: %s\n", neighborhood);
+    }
+
+    printf("# output: step cost\n");
+    printf("# seed: %lu\n", seedValue);
+}
+
+void printResultRow(int step, int costValue) {
+    printf("%d %d\n", step, costValue);
+}
+
 void writeTourFile( const char *prefix, int iter, int maxIter, int costValue, int *tour, int n, City *city) {
     char filename[256];
     FILE *fp;
@@ -182,28 +203,32 @@ void writeTourFile( const char *prefix, int iter, int maxIter, int costValue, in
 
 /*
 ランダムな巡回路を探索し、最良解を見つけだす。
-繰り返し回数と暫定解を出力できる。
 */
 int *randomSearch(int iteration, int n, City* city, int interval) {
     if (iteration <= 0) return NULL;
-    //printf("Iteration,Tentative Solution\n");
+
     int *besttour = NULL;
     int bestlength = INT_MAX;
-    for(int i = 1; i <= iteration; i++) {
+
+    for (int i = 1; i <= iteration; i++) {
         int *tour = buildRandomTour(n);
         int length = calcTourLength(tour, n);
-        if(length < bestlength) {
+
+        if (length < bestlength) {
             free(besttour);
             besttour = tour;
             bestlength = length;
-        }else {
+        } else {
             free(tour);
         }
-        //printf("%d,%d\n", i, bestlength);
-        if( i % interval == 0) {
+
+        printResultRow(i, bestlength);
+
+        if (i % interval == 0 || i == iteration) {
             writeTourFile("random", i, iteration, bestlength, besttour, n, city);
         }
     }
+
     return besttour;
 }
 
@@ -289,8 +314,7 @@ void reverseTourSection(int *tour, int left, int right)
     }
 }
 
-int improveBy2Opt(int *tour, int n)
-{
+int improveBy2Opt(int *tour, int n){
     int bestDelta = 0;
     int bestI = -1;
     int bestJ = -1;
@@ -349,43 +373,46 @@ int improveBy2Opt(int *tour, int n)
     }
 
     return 0;
-}
+}   
 
-HillClimbingResult hillClimbing(int *tour, int n, ImproveFunction improve, const char *prefix, int interval) {
+HillClimbingResult hillClimbing(
+    int *tour,
+    int n,
+    ImproveFunction improve,
+    const char *prefix,
+    int interval
+) {
     HillClimbingResult result;
 
     result.cost = calcTourLength(tour, n);
     result.iterations = 0;
 
-    printf("Iteration,Tentative Solution\n");
-    printf("%d,%d\n", result.iterations, result.cost);
+    printResultRow(result.iterations, result.cost);
+    writeTourFile(prefix, result.iterations, -1, result.cost, tour, n, city);
 
     while (1) {
-        /*
-         * 改善した場合は負のdelta、
-         * 改善できない場合は0が返る。
-         */
         int delta = improve(tour, n);
 
         if (delta == 0) {
             break;
         }
 
-
         result.cost += delta;
         result.iterations++;
 
-        printf("%d,%d\n", result.iterations, result.cost);
+        printResultRow(result.iterations, result.cost);
 
         if (result.iterations % interval == 0) {
             writeTourFile(prefix, result.iterations, -1, result.cost, tour, n, city);
         }
     }
+
     return result;
 }
 
 int main(int argc, char *argv[]) {
-    seed((uint_fast32_t)time(NULL));
+    unsigned long seedValue = (unsigned long)time(NULL);
+    seed((uint_fast32_t)seedValue);
     if (argc != 4) {
         fprintf(stderr,
            "Usage:\n"
@@ -481,12 +508,15 @@ int main(int argc, char *argv[]) {
     int *tour = NULL;
 
     if (config.method == METHOD_RANDOM) {
+        printResultHeader(FileName, "random_search", NULL, seedValue);
         tour = randomSearch(config.iterations, N, city, 100);
     } else if(config.method == METHOD_HC) {
         tour = buildRandomTour(N);
         if(config.neighborhood == NEIGHBOR_SWAP) {
+            printResultHeader(FileName, "hill-climbing", "swap", seedValue);
             hillClimbing(tour, N, improveBySwap, "hc-swap", 1);
         }else if(config.neighborhood == NEIGHBOR_2OPT) {
+            printResultHeader(FileName, "hill-climbing", "2opt", seedValue);
             hillClimbing(tour, N, improveBy2Opt, "hc-2opt", 1);
         }
     }
