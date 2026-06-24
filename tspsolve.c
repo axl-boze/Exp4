@@ -22,6 +22,10 @@ typedef struct {
     Neighborhood neighborhood; // 山登り法用
 } SearhConfig;
 
+typedef struct {
+    int cost;
+    int iterations;
+} HillClimbingResult;
 
 typedef struct {
     int id;
@@ -186,16 +190,177 @@ int *randomSearch(int iteration, int n, City* city) {
     return besttour;
 }
 
-int improveBySwap(int* tour, int n) {
-}
+//Swap近傍での辺の交換で影響を受ける点を選び、コストの差分を計算する
+int calcSwapDelta(int *tour, int n, int i, int j){
+    // 位置iまたはjを変更すると影響を受ける辺の始点
+    int candidates[4] = {(i + n - 1) % n, i, (j + n - 1) % n, j};
+    int affected[4];
+    int affectedCount = 0;
 
-int improveBy2opt(int* tour, int n) {
-}
+    // 重複する辺を取り除く
+    for (int k = 0; k < 4; k++) {
+        int duplicate = 0;
 
-void hillClimbing(int *tour, int n, ImproveFunction improve) {
-    while(improve(tour, n)){
+        for (int l = 0; l < affectedCount; l++) {
+            if (affected[l] == candidates[k]) {
+                duplicate = 1;
+                break;
+            }
+        }
 
+        if (!duplicate) {
+            affected[affectedCount] = candidates[k];
+            affectedCount++;
+        }
     }
+
+    int oldCost = 0;
+
+    for (int k = 0; k < affectedCount; k++) {
+        int p = affected[k];
+        int next = (p + 1) % n;
+
+        oldCost += cost(tour[p], tour[next]);
+    }
+
+    // 一時的に交換
+    swap(&tour[i], &tour[j]);
+
+    int newCost = 0;
+
+    for (int k = 0; k < affectedCount; k++) {
+        int p = affected[k];
+        int next = (p + 1) % n;
+
+        newCost += cost(tour[p], tour[next]);
+    }
+
+    // 元に戻す
+    swap(&tour[i], &tour[j]);
+
+    return newCost - oldCost;
+}
+
+int improveBySwap(int* tour, int n) {
+    int bestDelta = 0;
+    int bestI = -1;
+    int bestJ = -1;
+    for(int i = 0; i < n - 1; i++) {
+        for(int j = i + 1; j < n; j++) {
+            int delta = calcSwapDelta(tour, n, i, j);
+
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                bestI = i;
+                bestJ = j;
+            }
+        }
+    }
+    if (bestDelta < 0) {
+        swap(&tour[bestI], &tour[bestJ]);
+        return 1;
+    }
+    return 0;
+}
+
+void reverseTourSection(int *tour, int left, int right)
+{
+    while (left < right) {
+        swap(&tour[left], &tour[right]);
+        left++;
+        right--;
+    }
+}
+
+int improveBy2Opt(int *tour, int n)
+{
+    int bestDelta = 0;
+    int bestI = -1;
+    int bestJ = -1;
+
+    if (n < 4) {
+        return 0;
+    }
+
+    /*
+     * iとjは、交換する2本の辺の始点。
+     *
+     * 1本目: tour[i] -> tour[i + 1]
+     * 2本目: tour[j] -> tour[(j + 1) % n]
+     */
+    for (int i = 0; i < n - 1; i++) {
+        /*
+         * j = i + 1では2本の辺が隣接してしまうため、
+         * i + 2から開始する。
+         */
+        for (int j = i + 2; j < n; j++) {
+            /*
+             * 辺(n-1 -> 0)と辺(0 -> 1)も隣接しているので除外。
+             */
+            if (i == 0 && j == n - 1) {
+                continue;
+            }
+
+            int nextI = i + 1;
+            int nextJ = (j + 1) % n;
+
+            int oldCost =
+                  cost(tour[i], tour[nextI])
+                + cost(tour[j], tour[nextJ]);
+
+            int newCost =
+                  cost(tour[i],     tour[j])
+                + cost(tour[nextI], tour[nextJ]);
+
+            int delta = newCost - oldCost;
+
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                bestI = i;
+                bestJ = j;
+            }
+        }
+    }
+
+    if (bestDelta < 0) {
+        /*
+         * 2本の辺をつなぎ替えるため、
+         * tour[i + 1]からtour[j]までを逆順にする。
+         */
+        reverseTourSection(tour, bestI + 1, bestJ);
+        return bestDelta;
+    }
+
+    return 0;
+}
+
+HillClimbingResult hillClimbing(int *tour, int n, ImproveFunction improve) {
+    HillClimbingResult result;
+
+    result.cost = calcTourLength(tour, n);
+    result.iterations = 0;
+
+    printf("Iteration,Tentative Solution\n");
+    printf("%d,%d\n", result.iterations, result.cost);
+
+    while (1) {
+        /*
+         * 改善した場合は負のdelta、
+         * 改善できない場合は0が返る。
+         */
+        int delta = improve(tour, n);
+
+        if (delta == 0) {
+            break;
+        }
+
+
+        result.cost += delta;
+        result.iterations++;
+
+        printf("%d,%d\n", result.iterations, result.cost);
+    }
+    return result;
 }
 
 int main(int argc, char *argv[]) {
@@ -246,6 +411,11 @@ int main(int argc, char *argv[]) {
     do {
         char buf[100];
 
+        if (fscanf(fp, "%99s", buf) != 1) {
+            fprintf(stderr, "DIMENSION not found.\n");
+            fclose(fp);
+            exit(1);
+        }
 
         if (strcmp("DIMENSION", buf) == 0) {
             fscanf(fp, "%s", buf);
@@ -288,7 +458,7 @@ int main(int argc, char *argv[]) {
         if(config.neighborhood == NEIGHBOR_SWAP) {
             hillClimbing(tour, N, improveBySwap);
         }else if(config.neighborhood == NEIGHBOR_2OPT) {
-            hillClimbing2(tour, N, improveBy2opt);
+            hillClimbing(tour, N, improveBy2Opt);
         }
     }
     fclose(fp);
