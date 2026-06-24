@@ -1,3 +1,8 @@
+/*
+* $gcc -o tspsolve tspsolve.c mt19937.c -lm -I. 
+* のような形でコンパイル
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -258,7 +263,7 @@ int improveBySwap(int* tour, int n) {
     }
     if (bestDelta < 0) {
         swap(&tour[bestI], &tour[bestJ]);
-        return 1;
+        return bestDelta;
     }
     return 0;
 }
@@ -400,6 +405,7 @@ int main(int argc, char *argv[]) {
         }
     }else {
         fprintf(stderr, "Invailed argument\n");
+        exit(1);
     }
 
     FILE *fp = fopen(FileName, "r");
@@ -438,6 +444,13 @@ int main(int argc, char *argv[]) {
 
     do {
         char buf[100];
+
+        if (fscanf(fp, "%99s", buf) != 1) {
+            fprintf(stderr, "NODE_COORD_SECTION not found.\n");
+            free(city);
+            fclose(fp);
+            exit(1);
+        }
 
         if (strcmp("NODE_COORD_SECTION", buf) == 0) {
             for (int i = 0; i < N; i++) {
