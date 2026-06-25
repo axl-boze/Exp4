@@ -9,7 +9,15 @@
 #include <math.h>
 #include <time.h>
 #include <limits.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "mt19937.h"
+
+#define SA_DEFAULT_INITIAL_T 100
+#define SA_DEFAULT_INITIAL_R 100
+#define SA_DEFAULT_ALPHA 0.99
+#define SA_DEFAULT_BETA 1.0
+#define SA_DEFAULT_MIN_T 1
 
 typedef enum {
     METHOD_RANDOM,
@@ -26,6 +34,11 @@ typedef struct {
     SearchMethod method;
     int iterations; //ランダム探索用
     Neighborhood neighborhood; // 山登り・SA法用
+    double initialTemperature;
+    int initialRepetitions;
+    double alpha;
+    double beta;
+    double minTemperature;
 } SearhConfig;
 
 typedef struct {
@@ -33,7 +46,18 @@ typedef struct {
     int iterations;
 } HillClimbingResult;
 
+typedef struct {
+    int cost;
+    int steps;
+    double temperature;
+    int repetitions;
+} SimulatedAnnealingResult;
 
+typedef struct {
+    int i;
+    int j;
+    int delta;
+} NeighborMove;
 
 typedef struct {
     int id;
@@ -127,6 +151,27 @@ void swap(int* a, int* b) {
     *a = *b;
     *b = tmp;
 }
+
+double randomDouble(void) {
+    return genrand() / ((double)MT19937_MAX + 1.0);
+}
+
+int randomInt(int upper) {
+    return (int)(randomDouble() * upper);
+}
+
+int *copyTour(int *tour, int n) {
+    int *copiedTour = malloc(sizeof(int) * n);
+
+    if (copiedTour == NULL) {
+        fprintf(stderr, "tour copy allocation fault.\n");
+        exit(1);
+    }
+
+    memcpy(copiedTour, tour, sizeof(int) * n);
+    return copiedTour;
+}
+
 /*
 ランダムな巡回路を作成。
 n番目の要素を、乱数の割り算によって決めていく。
@@ -134,7 +179,7 @@ n番目の要素を、乱数の割り算によって決めていく。
 int *buildRandomTour(int n) {
     int *tour = buildAscendingTour(n);
     for( int i = n - 1; i > 0; i--) {
-        int j = genrand() % (i + 1);
+        int j = randomInt(i + 1);
         swap(&tour[i], &tour[j]);
     }
     return tour;
@@ -169,14 +214,48 @@ void printResultHeader(
     printf("# seed: %lu\n", seedValue);
 }
 
+void printSaResultHeader(
+    const char *instance,
+    const char *neighborhood,
+    double initialTemperature,
+    int initialRepetitions,
+    double alpha,
+    double beta,
+    double minTemperature,
+    unsigned long seedValue
+) {
+    printf("# Instance: %s\n", instance);
+    printf("# Method: SA\n");
+    printf("# Neighborhood: %s\n", neighborhood);
+    printf("# Initial T: %.6f\n", initialTemperature);
+    printf("# Initial R: %d\n", initialRepetitions);
+    printf("# alpha: %.6f\n", alpha);
+    printf("# beta: %.6f\n", beta);
+    printf("# Minimum T: %.6f\n", minTemperature);
+    printf("# seed: %lu\n", seedValue);
+    printf("# output: step cost\n");
+}
+
 void printResultRow(int step, int costValue) {
     printf("%d %d\n", step, costValue);
+}
+
+void ensureTourDirectory(const char *prefix) {
+    char dirname[256];
+
+    snprintf(dirname, sizeof(dirname), "./%s-tour", prefix);
+
+    if (mkdir(dirname, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "directory create error: %s\n", dirname);
+        exit(1);
+    }
 }
 
 void writeTourFile( const char *prefix, int iter, int maxIter, int costValue, int *tour, int n, City *city) {
     char filename[256];
     FILE *fp;
 
+    ensureTourDirectory(prefix);
     snprintf(filename, sizeof(filename), "./%s-tour/%s-tour-%d.dat", prefix, prefix, iter);
 
     fp = fopen(filename, "w");
@@ -200,6 +279,51 @@ void writeTourFile( const char *prefix, int iter, int maxIter, int costValue, in
     }
 
     fprintf(fp, "%d %d\n", city[tour[0]].x, city[tour[0]].y);
+
+    fclose(fp);
+}
+
+void writeSaTourFile(
+    const char *prefix,
+    int step,
+    int costValue,
+    int *tour,
+    int n,
+    City *city,
+    const SearhConfig *config,
+    double currentTemperature,
+    int currentRepetitions
+) {
+    char filename[256];
+    FILE *fp;
+
+    ensureTourDirectory(prefix);
+    snprintf(filename, sizeof(filename), "./%s-tour/%s-tour-%d.dat", prefix, prefix, step);
+
+    fp = fopen(filename, "w");
+    if (fp == NULL) {
+        fprintf(stderr, "FILE open error: %s\n", filename);
+        exit(1);
+    }
+
+    fprintf(fp, "# Instance: %s\n", FileName);
+    fprintf(fp, "# Method: SA\n");
+    fprintf(fp, "# Neighborhood: %s\n", config->neighborhood == NEIGHBOR_SWAP ? "swap" : "2-opt");
+    fprintf(fp, "# Initial T: %.6f\n", config->initialTemperature);
+    fprintf(fp, "# Initial R: %d\n", config->initialRepetitions);
+    fprintf(fp, "# alpha: %.6f\n", config->alpha);
+    fprintf(fp, "# beta: %.6f\n", config->beta);
+    fprintf(fp, "# current step: %d\n", step);
+    fprintf(fp, "# current T: %.6f\n", currentTemperature);
+    fprintf(fp, "# current R: %d\n", currentRepetitions);
+    fprintf(fp, "# Cost: %d\n", costValue);
+    fprintf(fp, "# output: id x y\n");
+
+    for (int k = 0; k < n; k++) {
+        fprintf(fp, "%d %d %d\n", city[tour[k]].id, city[tour[k]].x, city[tour[k]].y);
+    }
+
+    fprintf(fp, "%d %d %d\n", city[tour[0]].id, city[tour[0]].x, city[tour[0]].y);
 
     fclose(fp);
 }
@@ -378,6 +502,59 @@ int improveBy2Opt(int *tour, int n){
     return 0;
 }   
 
+int selectRandomSwapMove(int *tour, int n, NeighborMove *move) {
+    if (n < 2) {
+        return 0;
+    }
+
+    move->i = randomInt(n);
+
+    do {
+        move->j = randomInt(n);
+    } while (move->i == move->j);
+
+    if (move->i > move->j) {
+        swap(&move->i, &move->j);
+    }
+
+    move->delta = calcSwapDelta(tour, n, move->i, move->j);
+    return 1;
+}
+
+int selectRandom2OptMove(int *tour, int n, NeighborMove *move) {
+    if (n < 4) {
+        return 0;
+    }
+
+    do {
+        move->i = randomInt(n - 1);
+        move->j = randomInt(n);
+
+        if (move->i > move->j) {
+            swap(&move->i, &move->j);
+        }
+    } while (move->j <= move->i + 1 || (move->i == 0 && move->j == n - 1));
+
+    move->delta = calc2optDelta(tour, n, move->i, move->j);
+    return 1;
+}
+
+int selectRandomNeighborMove(int *tour, int n, Neighborhood neighborhood, NeighborMove *move) {
+    if (neighborhood == NEIGHBOR_SWAP) {
+        return selectRandomSwapMove(tour, n, move);
+    }
+
+    return selectRandom2OptMove(tour, n, move);
+}
+
+void applyNeighborMove(int *tour, Neighborhood neighborhood, NeighborMove move) {
+    if (neighborhood == NEIGHBOR_SWAP) {
+        swap(&tour[move.i], &tour[move.j]);
+    } else {
+        reverseTourSection(tour, move.i + 1, move.j);
+    }
+}
+
 HillClimbingResult hillClimbing(
     int *tour,
     int n,
@@ -413,44 +590,204 @@ HillClimbingResult hillClimbing(
     return result;
 }
 
+SimulatedAnnealingResult simulatedAnnealing(
+    int *tour,
+    int n,
+    const SearhConfig *config,
+    const char *prefix
+) {
+    SimulatedAnnealingResult result;
+    int currentCost = calcTourLength(tour, n);
+    int *bestTour = copyTour(tour, n);
+    int bestCost = currentCost;
+    int outputInterval = config->initialRepetitions;
+
+    result.steps = 0;
+    result.temperature = config->initialTemperature;
+    result.repetitions = config->initialRepetitions;
+    result.cost = bestCost;
+
+    printResultRow(result.steps, bestCost);
+    writeSaTourFile(prefix, result.steps, bestCost, bestTour, n, city, config, result.temperature, result.repetitions);
+
+    while (result.temperature > config->minTemperature) {
+        for (int r = 0; r < result.repetitions; r++) {
+            NeighborMove move;
+
+            if (!selectRandomNeighborMove(tour, n, config->neighborhood, &move)) {
+                break;
+            }
+
+            result.steps++;
+
+            int accept = 0;
+
+            if (move.delta <= 0) {
+                accept = 1;
+            } else {
+                double probability = exp(-(double)move.delta / result.temperature);
+                accept = randomDouble() < probability;
+            }
+
+            if (accept) {
+                applyNeighborMove(tour, config->neighborhood, move);
+                currentCost += move.delta;
+
+                if (currentCost <= bestCost) {
+                    bestCost = currentCost;
+                    memcpy(bestTour, tour, sizeof(int) * n);
+                }
+            }
+
+            printResultRow(result.steps, bestCost);
+
+            if (result.steps % outputInterval == 0) {
+                writeSaTourFile(prefix, result.steps, bestCost, bestTour, n, city, config, result.temperature, result.repetitions);
+            }
+        }
+
+        result.temperature *= config->alpha;
+
+        double nextRepetitions = round(result.repetitions * config->beta);
+        if (nextRepetitions > INT_MAX) {
+            fprintf(stderr, "R is too large.\n");
+            exit(1);
+        }
+
+        result.repetitions = (int)nextRepetitions;
+        if (result.repetitions < 1) {
+            result.repetitions = 1;
+        }
+    }
+
+    if (result.steps % outputInterval != 0) {
+        writeSaTourFile(prefix, result.steps, bestCost, bestTour, n, city, config, result.temperature, result.repetitions);
+    }
+
+    memcpy(tour, bestTour, sizeof(int) * n);
+    result.cost = bestCost;
+    free(bestTour);
+
+    return result;
+}
+
+void printUsage(const char *program) {
+    fprintf(stderr,
+       "Usage:\n"
+       "  %s <file> r  <iterations>\n"
+       "  %s <file> hc <neighborhood>\n"
+       "  %s <file> sa <neighborhood> [initialT initialR alpha beta minT]\n"
+       "\n"
+       "Neighborhood: swap, 2opt\n",
+        program, program, program);
+}
+
+int parsePositiveIntArg(const char *text, const char *name) {
+    char *end;
+    long value = strtol(text, &end, 10);
+
+    if (*end != '\0' || value <= 0 || value > INT_MAX) {
+        fprintf(stderr, "Invalid %s: %s\n", name, text);
+        exit(1);
+    }
+
+    return (int)value;
+}
+
+double parsePositiveDoubleArg(const char *text, const char *name) {
+    char *end;
+    double value = strtod(text, &end);
+
+    if (*end != '\0' || value <= 0.0 || !isfinite(value)) {
+        fprintf(stderr, "Invalid %s: %s\n", name, text);
+        exit(1);
+    }
+
+    return value;
+}
+
+Neighborhood parseNeighborhoodArg(const char *text) {
+    if (strcmp(text, "swap") == 0) {
+        return NEIGHBOR_SWAP;
+    }
+
+    if (strcmp(text, "2opt") == 0) {
+        return NEIGHBOR_2OPT;
+    }
+
+    fprintf(stderr, "Invalid neighborhood option: %s\n", text);
+    exit(1);
+}
+
+const char *neighborhoodName(Neighborhood neighborhood) {
+    return neighborhood == NEIGHBOR_SWAP ? "swap" : "2-opt";
+}
+
 int main(int argc, char *argv[]) {
     unsigned long seedValue = (unsigned long)time(NULL);
     seed((uint_fast32_t)seedValue);
-    if (argc != 4) {
-        fprintf(stderr,
-           "Usage:\n"
-           "  %s <file> r  <iterations>\n"
-           "  %s <file> hc <neighborhood>\n",
-            argv[0], argv[0]);
+
+    if (argc < 4) {
+        printUsage(argv[0]);
         exit(1);
     }
 
     FileName = argv[1];
 
     SearhConfig config;
+    config.iterations = 0;
+    config.neighborhood = NEIGHBOR_SWAP;
+    config.initialTemperature = SA_DEFAULT_INITIAL_T;
+    config.initialRepetitions = SA_DEFAULT_INITIAL_R;
+    config.alpha = SA_DEFAULT_ALPHA;
+    config.beta = SA_DEFAULT_BETA;
+    config.minTemperature = SA_DEFAULT_MIN_T;
 
     if(strcmp(argv[2], "r") == 0) {
-        char *end;
-        long value = strtol(argv[3], &end, 10);
-        if (*end != '\0' || value <= 0 || value > INT_MAX) {
-            fprintf(stderr, "Invalid iteration count: %s\n", argv[3]);
+        if (argc != 4) {
+            printUsage(argv[0]);
             exit(1);
         }
-        config.method = METHOD_RANDOM;
-        config.iterations = (int)value;
-    }else if (strcmp(argv[2], "hc") == 0) {
-        config.method = METHOD_HC;
 
-        if (strcmp(argv[3], "swap") == 0) {
-            config.neighborhood = NEIGHBOR_SWAP; 
-        }else if (strcmp(argv[3], "2opt") == 0) {
-            config.neighborhood = NEIGHBOR_2OPT;
-        }else{
-            fprintf(stderr, "Invailed Neighborhood option\n");
+        config.method = METHOD_RANDOM;
+        config.iterations = parsePositiveIntArg(argv[3], "iteration count");
+    }else if (strcmp(argv[2], "hc") == 0) {
+        if (argc != 4) {
+            printUsage(argv[0]);
+            exit(1);
+        }
+
+        config.method = METHOD_HC;
+        config.neighborhood = parseNeighborhoodArg(argv[3]);
+    }else if (strcmp(argv[2], "sa") == 0) {
+        if (argc != 4 && argc != 9) {
+            printUsage(argv[0]);
+            exit(1);
+        }
+
+        config.method = METHOD_SA;
+        config.neighborhood = parseNeighborhoodArg(argv[3]);
+
+        if (argc == 9) {
+            config.initialTemperature = parsePositiveDoubleArg(argv[4], "initial temperature");
+            config.initialRepetitions = parsePositiveIntArg(argv[5], "initial repetitions");
+            config.alpha = parsePositiveDoubleArg(argv[6], "alpha");
+            config.beta = parsePositiveDoubleArg(argv[7], "beta");
+            config.minTemperature = parsePositiveDoubleArg(argv[8], "minimum temperature");
+        }
+
+        if (config.alpha >= 1.0) {
+            fprintf(stderr, "Invalid alpha: alpha must satisfy 0.0 < alpha < 1.0\n");
+            exit(1);
+        }
+
+        if (config.minTemperature >= config.initialTemperature) {
+            fprintf(stderr, "Invalid minimum temperature: minT must be smaller than initialT\n");
             exit(1);
         }
     }else {
-        fprintf(stderr, "Invailed argument\n");
+        fprintf(stderr, "Invalid argument: %s\n", argv[2]);
+        printUsage(argv[0]);
         exit(1);
     }
 
@@ -519,9 +856,24 @@ int main(int argc, char *argv[]) {
             printResultHeader(FileName, "hill-climbing", "swap", seedValue);
             hillClimbing(tour, N, improveBySwap, "hc-swap", 1);
         }else if(config.neighborhood == NEIGHBOR_2OPT) {
-            printResultHeader(FileName, "hill-climbing", "2opt", seedValue);
+            printResultHeader(FileName, "hill-climbing", "2-opt", seedValue);
             hillClimbing(tour, N, improveBy2Opt, "hc-2opt", 1);
         }
+    } else if(config.method == METHOD_SA) {
+        const char *prefix = config.neighborhood == NEIGHBOR_SWAP ? "sa-swap" : "sa-2opt";
+
+        tour = buildRandomTour(N);
+        printSaResultHeader(
+            FileName,
+            neighborhoodName(config.neighborhood),
+            config.initialTemperature,
+            config.initialRepetitions,
+            config.alpha,
+            config.beta,
+            config.minTemperature,
+            seedValue
+        );
+        simulatedAnnealing(tour, N, &config, prefix);
     }
     fclose(fp);
     free(city);
