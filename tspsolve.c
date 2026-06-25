@@ -13,7 +13,8 @@
 
 typedef enum {
     METHOD_RANDOM,
-    METHOD_HC
+    METHOD_HC,
+    METHOD_SA
 } SearchMethod;
 
 typedef enum {
@@ -24,13 +25,15 @@ typedef enum {
 typedef struct {
     SearchMethod method;
     int iterations; //ランダム探索用
-    Neighborhood neighborhood; // 山登り法用
+    Neighborhood neighborhood; // 山登り・SA法用
 } SearhConfig;
 
 typedef struct {
     int cost;
     int iterations;
 } HillClimbingResult;
+
+
 
 typedef struct {
     int id;
@@ -305,6 +308,17 @@ int improveBySwap(int* tour, int n) {
     return 0;
 }
 
+int calc2optDelta(int *tour, int n, int i, int j) {
+    int nextI = i + 1;
+    int nextJ = (j + 1) % n;
+
+    int oldCost = cost(tour[i], tour[nextI]) + cost(tour[j], tour[nextJ]);
+
+    int newCost = cost(tour[i], tour[j]) + cost(tour[nextI], tour[nextJ]);
+
+    return newCost - oldCost;
+}
+
 void reverseTourSection(int *tour, int left, int right)
 {
     while (left < right) {
@@ -342,18 +356,7 @@ int improveBy2Opt(int *tour, int n){
                 continue;
             }
 
-            int nextI = i + 1;
-            int nextJ = (j + 1) % n;
-
-            int oldCost =
-                  cost(tour[i], tour[nextI])
-                + cost(tour[j], tour[nextJ]);
-
-            int newCost =
-                  cost(tour[i],     tour[j])
-                + cost(tour[nextI], tour[nextJ]);
-
-            int delta = newCost - oldCost;
+            int delta = calc2optDelta(tour, n, i, j);
 
             if (delta < bestDelta) {
                 bestDelta = delta;
